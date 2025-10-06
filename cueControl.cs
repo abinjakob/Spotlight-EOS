@@ -161,6 +161,24 @@ public class cueControl : MonoBehaviour
         }
     }
 
+    private IEnumerator WaitForClassifierEvent(int expectedCode, float timeoutSeconds)
+    {
+        float startTime = Time.time;
+        classifierEventCode = 0;
+
+        while (classifierEventCode != expectedCode)
+        {
+            if (Time.time - startTime > timeoutSeconds)
+            {
+                Debug.LogWarning($"Timeout waiting for classifier event {expectedCode}. Skipping...");
+                yield break; 
+            }
+            yield return null; 
+        }
+
+        Debug.Log($"Received classifier event {expectedCode}");
+    }
+
 
 
     // single trial logic
@@ -196,10 +214,7 @@ public class cueControl : MonoBehaviour
 
             // wait for classifier to send event 1
             classifierEventCode = 0;
-            while (classifierEventCode != 1)
-            {
-                yield return null; 
-            }
+            yield return StartCoroutine(WaitForClassifierEvent(1, 5f));
             if (connectionManager != null)
             {
                 connectionManager.Send("flk_1", "MarkerStream");
@@ -215,10 +230,7 @@ public class cueControl : MonoBehaviour
 
             // wait for classifier to send event 2
             classifierEventCode = 0;
-            while (classifierEventCode != 2)
-            {
-                yield return null; 
-            }
+            yield return StartCoroutine(WaitForClassifierEvent(1, 5f));
             //Target_1.SetActive(false);
             Target_1_cue.SetActive(false);
             classifierEventCode = 0;
