@@ -1,0 +1,298 @@
+using Network;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class cueControl : MonoBehaviour
+{
+    // GameObjects
+    public GameObject FixationCross;
+    // target flcikers
+    public GameObject Target_1;
+    public GameObject Target_2;
+    public GameObject Target_3;
+    public GameObject Target_4;
+    public GameObject Target_5;
+    public GameObject Target_6;
+    // target holder
+    public GameObject Target_1_holder;
+    public GameObject Target_2_holder;
+    public GameObject Target_3_holder;
+    public GameObject Target_4_holder;
+    public GameObject Target_5_holder;
+    public GameObject Target_6_holder;
+    // target cues
+    public GameObject Target_1_cue;
+    public GameObject Target_2_cue;
+    public GameObject Target_3_cue;
+    public GameObject Target_4_cue;
+    public GameObject Target_5_cue;
+    public GameObject Target_6_cue;
+
+
+    // experiment start delay
+    public float startDelay = 5;
+
+    // total number of trials
+    public int trialcount = 10;
+
+    // trial setup
+    public string[] targets;
+    public string[] trialSequence;
+    public string currentTrial;
+
+    // base ITI duration
+    public float fixationPeriod = 1f;
+    public float interTrialInterval = 3f;
+    // ITI with a jitter
+    private float iti;
+
+    // reference from flickerControl 
+    private float flickerPeriod;
+    private flickerControl flickerControl1;
+    private flickerControl flickerControl2;
+    private flickerControl flickerControl3;
+    private flickerControl flickerControl4;
+    private flickerControl flickerControl5;
+    private flickerControl flickerControl6;
+
+    // connection manager
+    public ConnectionManager connectionManager;
+
+    // classifier output
+    private int classifierEventCode;
+    private float classifierX;
+    private float classifierY;
+
+
+
+    void Awake()
+    {
+        // initialise all gameObjects inactive
+        FixationCross.SetActive(false);
+        Target_1.SetActive(false);
+        Target_2.SetActive(false);
+        Target_3.SetActive(false);
+        Target_4.SetActive(false);
+        Target_5.SetActive(false);
+        Target_6.SetActive(false);
+        Target_1_holder.SetActive(false);
+        Target_2_holder.SetActive(false);
+        Target_3_holder.SetActive(false);
+        Target_4_holder.SetActive(false);
+        Target_5_holder.SetActive(false);
+        Target_6_holder.SetActive(false);
+        Target_1_cue.SetActive(false);
+        Target_2_cue.SetActive(false);
+        Target_3_cue.SetActive(false);
+        Target_4_cue.SetActive(false);
+        Target_5_cue.SetActive(false);
+        Target_6_cue.SetActive(false);
+
+        // get reference from flickerControl script
+        flickerControl1 = Target_1.GetComponent<flickerControl>();
+        flickerControl2 = Target_2.GetComponent<flickerControl>();
+        flickerControl3 = Target_3.GetComponent<flickerControl>();
+        flickerControl4 = Target_4.GetComponent<flickerControl>();
+        flickerControl5 = Target_5.GetComponent<flickerControl>();
+        flickerControl6 = Target_6.GetComponent<flickerControl>();
+        flickerPeriod = flickerControl1.trialDuration;
+
+        // connection manager
+        connectionManager = FindObjectOfType<ConnectionManager>();
+
+        // create trial sequence
+        //targets = new string[] { "1", "2", "3", "4", "5", "6" };
+        targets = new string[] { "1", "1"};
+        trialSequence = new string[trialcount];
+        for (int i = 0; i < trialcount; i++)
+        {
+            trialSequence[i] = targets[i % targets.Length]; 
+        }
+
+        // start experiment loop
+        ShuffleArray(trialSequence);
+        StartCoroutine(RunExperiment());
+    }
+
+    private void OnEnable()
+    {
+        ClassifierReceiver.OnClassifierEvent += HandleClassifierEvent;
+    }
+
+    private void OnDisable()
+    {
+        ClassifierReceiver.OnClassifierEvent -= HandleClassifierEvent;
+    }
+
+    private void HandleClassifierEvent(int eventCode, float x, float y)
+    {
+        classifierEventCode = eventCode;
+        classifierX = x;
+        classifierY = y;
+
+        Debug.Log($"Classifier Event: Code={eventCode}, X={x}, Y={y}");
+    }
+
+    void ShuffleArray(string[] array)
+    {
+        for (int i = array.Length - 1; i > 0; i--)
+        {
+            int j = Random.Range(0, i + 1);
+            string temp = array[i];
+            array[i] = array[j];
+            array[j] = temp;
+        }
+    }
+
+    //experiment loop coroutine
+    IEnumerator RunExperiment()
+    {
+        yield return new WaitForSeconds(startDelay);
+        // loop over trials 
+        for (int i = 0; i < trialcount; i++)
+        {
+            currentTrial = trialSequence[i];
+            // run trials
+            yield return StartCoroutine(BeginTrial());
+            // run iti with a jitter
+            iti = interTrialInterval + Random.value;
+            yield return new WaitForSeconds(iti);
+        }
+    }
+
+
+
+    // single trial logic
+    IEnumerator BeginTrial()
+    {
+
+        // show stimulus fixation 
+        FixationCross.SetActive(true);
+        yield return new WaitForSeconds(fixationPeriod);
+        // hide fixation cross
+        FixationCross.SetActive(false);
+
+        Target_1_holder.SetActive(true);
+        Target_2_holder.SetActive(true);
+        Target_3_holder.SetActive(true);
+        Target_4_holder.SetActive(true);
+        Target_5_holder.SetActive(true);
+        Target_6_holder.SetActive(true);
+
+        if (currentTrial == "1")
+        {
+            yield return new WaitForSeconds(3);
+            // starting trial cue
+            Target_1_cue.SetActive(true);
+            if (connectionManager != null)
+            {
+                connectionManager.Send("cue_1", "MarkerStream");
+                Debug.Log("Sending marker: " + "cue_1");
+            }
+            else
+                Debug.Log("Not Connected");
+
+
+            // wait for classifier to send event 1
+            classifierEventCode = 0;
+            while (classifierEventCode != 1)
+            {
+                yield return null; 
+            }
+            if (connectionManager != null)
+            {
+                connectionManager.Send("flk_1", "MarkerStream");
+                Debug.Log("Sending marker: " + "flk_1");
+            }
+            else
+                Debug.Log("Not Connected");
+            Target_1_holder.SetActive(false);
+            //Target_1.SetActive(true);
+            //flickerControl1.StartFlickering();
+            yield return new WaitForSeconds(flickerPeriod);
+
+
+            // wait for classifier to send event 2
+            classifierEventCode = 0;
+            while (classifierEventCode != 2)
+            {
+                yield return null; 
+            }
+            //Target_1.SetActive(false);
+            Target_1_cue.SetActive(false);
+            classifierEventCode = 0;
+
+
+
+        }
+        else if (currentTrial == "2")
+        {
+            yield return new WaitForSeconds(2);
+            Target_2_cue.SetActive(true);
+            yield return new WaitForSeconds(2);
+            Target_2_holder.SetActive(false);
+            Target_2.SetActive(true);
+            flickerControl2.StartFlickering();
+            yield return new WaitForSeconds(flickerPeriod);
+            Target_2.SetActive(false);
+            Target_2_cue.SetActive(false);
+        }
+        else if (currentTrial == "3")
+        {
+            yield return new WaitForSeconds(2);
+            Target_3_cue.SetActive(true);
+            yield return new WaitForSeconds(2);
+            Target_3_holder.SetActive(false);
+            Target_3.SetActive(true);
+            flickerControl3.StartFlickering();
+            yield return new WaitForSeconds(flickerPeriod);
+            Target_3.SetActive(false);
+            Target_3_cue.SetActive(false);
+        }
+        else if (currentTrial == "4")
+        {
+            yield return new WaitForSeconds(2);
+            Target_4_cue.SetActive(true);
+            yield return new WaitForSeconds(2);
+            Target_4_holder.SetActive(false);
+            Target_4.SetActive(true);
+            flickerControl4.StartFlickering();
+            yield return new WaitForSeconds(flickerPeriod);
+            Target_4.SetActive(false);
+            Target_4_cue.SetActive(false);
+        }
+        else if (currentTrial == "5")
+        {
+            yield return new WaitForSeconds(2);
+            Target_5_cue.SetActive(true);
+            yield return new WaitForSeconds(2);
+            Target_5_holder.SetActive(false);
+            Target_5.SetActive(true);
+            flickerControl5.StartFlickering();
+            yield return new WaitForSeconds(flickerPeriod);
+            Target_5.SetActive(false);
+            Target_5_cue.SetActive(false);
+        }
+        else if (currentTrial == "6")
+        {
+            yield return new WaitForSeconds(2);
+            Target_6_cue.SetActive(true);
+            yield return new WaitForSeconds(2);
+            Target_6_holder.SetActive(false);
+            Target_6.SetActive(true);
+            flickerControl6.StartFlickering();
+            yield return new WaitForSeconds(flickerPeriod);
+            Target_6.SetActive(false);
+            Target_6_cue.SetActive(false);
+        }
+
+        Target_1_holder.SetActive(false);
+        Target_2_holder.SetActive(false);
+        Target_3_holder.SetActive(false);
+        Target_4_holder.SetActive(false);
+        Target_5_holder.SetActive(false);
+        Target_6_holder.SetActive(false);
+
+    }
+}
