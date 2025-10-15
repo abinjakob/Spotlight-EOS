@@ -24,11 +24,13 @@ import numpy as np
 
 
 FLOAT_TYPE = 0x05
-vel_values = []
+
 
 # coordinates of the target boxes (hard coded)
 target_boxes = np.array([(-0.1, 0.05),  (0.0, 0.05),  (0.1, 0.05),
                          (-0.1, -0.05), (0.0, -0.05), (0.1, -0.05)])
+
+FLK_RADIUS = 0.05
 
 # find the fixated target
 def findtarget(anchor):
@@ -56,7 +58,6 @@ class FixationClassifier:
         self.triggered = False  
 
     def process_point(self, timestamp, x, y):
-        global vel_values
         event = None
         anchor = self.anchor_xy if self.in_fixation else None
 
@@ -69,7 +70,6 @@ class FixationClassifier:
         dy = y - self.prev[2]
         vel = np.sqrt(dx*dx + dy*dy) / dt
         self.prev = (timestamp, x, y)
-        vel_values.append(vel)
 
         below = vel < self.vth
 
@@ -135,15 +135,11 @@ PORT = 5000
 server_running = threading.Event()
 server_running.set()
 
-eyedata_packetloss = 0
-trials  = 0
-cue_acc = 0
-flk_acc = 0
 trials_lock = threading.Lock()
 
 # main logic
 def clientHandler(conn, addr):
-    global eyedata_packetloss, trials, anchor, cue_acc, flk_acc
+    global eyedata_packetloss, trials, anchor, cue_acc
 
     print(f"[NEW CONNECTION] {addr} connected.")
 
@@ -154,6 +150,14 @@ def clientHandler(conn, addr):
     fixClassifier = FixationClassifier(sampling_rate=60, velocity_threshold=0.5)
     cue_max_period = 5
     flk_max_period = 5
+    current_anchor = None  
+    flk_collecting = False
+    FLK_REQUIRED_DURATION = 3.0  
+    fixation_start_time = None
+    eyedata_packetloss = 0
+    trials  = 0
+    cue_acc = 0
+    flk_acc = 0
 
     conn.settimeout(1.0)
 
@@ -182,6 +186,7 @@ def clientHandler(conn, addr):
                     with collecting_lock:
                         collecting = True
                         fixClassifier.reset()
+                        current_anchor = None
 
                     # Stop collection after cue duration
                     def end_cue():
@@ -193,7 +198,20 @@ def clientHandler(conn, addr):
 
                 elif 'flk' in markerText:
                     print(f"[{datetime.now()}] [{streamName}] [Trial {trials}]: {markerText}")
-                    threading.Timer(flk_max_period, lambda: sendOutput(conn, event_code=2.0, x=0.0, y=0.0)).start()
+                    # start flk collection
+                    flk_collecting = True
+                    fixation_start_time = None
+                    
+                    def end_flk():
+                        nonlocal flk_collecting
+                        if flk_collecting:
+                            sendOutput(conn, event_code=2.0, x=1.0, y=0.0)
+                            print(f"[Trial {trials}] Fixation not maintained, (acc= {(flk_acc/trials)*100})")
+                            flk_collecting = False
+                            fixation_start_time = None
+                        flk_collecting = False
+                
+                    threading.Timer(flk_max_period, end_flk).start()
 
             
             # EyeStream processing
@@ -208,14 +226,33 @@ def clientHandler(conn, addr):
                             if collecting:
                                 label, event, anchor = fixClassifier.process_point(timestamp, x, y)
                                 if event == 'trigger' and anchor is not None:
-                                    targetidx_pred = findtarget(anchor)
+                                    current_anchor = anchor
+                                    targetidx_pred = findtarget(current_anchor)
                                     if targetidx == (targetidx_pred+1):
                                         cue_acc += 1
-                                        sendOutput(conn, event_code=1.0, x=1.0, y=0.0)
-                                        print(f"[Trial {trials}] Fixated on target box, (acc= {cue_acc})")
-                                    else:
                                         sendOutput(conn, event_code=1.0, x=0.0, y=0.0)
-                                        print(f"[Trial {trials}] Fixated on wrong box, (acc= {cue_acc})")
+                                        print(f"[Trial {trials}] Fixated on target box, (acc= {(cue_acc/trials)*100})")
+                                    else:
+                                        sendOutput(conn, event_code=1.0, x=1.0, y=0.0)
+                                        print(f"[Trial {trials}] Fixated on wrong box, (acc= {(cue_acc/trials)*100})")
+                            elif flk_collecting and current_anchor is not None:
+                                # check distance to cue anchor
+                                dx = x - current_anchor[0]
+                                dy = y - current_anchor[1]
+                                dist = np.sqrt(dx*dx + dy*dy)
+                                now = time.time()
+                                
+                                if dist <= FLK_RADIUS:
+                                    if fixation_start_time is None:
+                                        fixation_start_time = now
+                                    elif now - fixation_start_time >= FLK_REQUIRED_DURATION:
+                                        flk_acc +=1
+                                        sendOutput(conn, event_code=2.0, x=0.0, y=0.0)
+                                        print(f"[Trial {trials}] Fixation maintained on target, (acc= {(flk_acc/trials)*100})")
+                                        flk_collecting = False
+                                else:
+                                    fixation_start_time = None
+                                    
                                             
                     else:
                         eyedata_packetloss += 1
